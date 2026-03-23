@@ -14,7 +14,7 @@ services:
       - default
     ports:
       # ws服务端
-      - "8000:8000"
+      - "8004:8000"
       # http服务的端口，用于视觉分析接口
       - "8003:8003"
     security_opt:
