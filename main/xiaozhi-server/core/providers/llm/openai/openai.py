@@ -38,18 +38,23 @@ class LLMProvider(LLMProviderBase):
             except (ValueError, TypeError):
                 setattr(self, param, None)
 
-        logger.debug(
-            f"意图识别参数初始化: {self.temperature}, {self.max_tokens}, {self.top_p}, {self.frequency_penalty}"
+        logger.bind(tag=TAG).info(
+            f"LLM params init: temperature={self.temperature}, max_tokens={self.max_tokens}, top_p={self.top_p}, frequency_penalty={self.frequency_penalty}"
         )
 
         model_key_msg = check_model_key("LLM", self.api_key)
         if model_key_msg:
             logger.bind(tag=TAG).error(model_key_msg)
+
+        masked_key = f"{self.api_key[:8]}...{self.api_key[-4:]}" if self.api_key and len(self.api_key) > 12 else "NOT SET"
+        logger.bind(tag=TAG).info(
+            f"LLM provider initialized: model={self.model_name}, base_url={self.base_url}, api_key={masked_key}"
+        )
         self.client = openai.OpenAI(api_key=self.api_key, base_url=self.base_url, timeout=httpx.Timeout(self.timeout))
 
     @staticmethod
     def normalize_dialogue(dialogue):
-        """自动修复 dialogue 中缺失 content 的消息"""
+        """Auto-fix messages missing 'content' field in dialogue"""
         for msg in dialogue:
             if "role" in msg and "content" not in msg:
                 msg["content"] = ""
@@ -64,7 +69,11 @@ class LLMProvider(LLMProviderBase):
             "stream": True,
         }
 
-        # 添加可选参数,只有当参数不为None时才添加
+        logger.bind(tag=TAG).debug(
+            f"LLM request: model={self.model_name}, base_url={self.base_url}, dialogue_len={len(dialogue)}"
+        )
+
+        # Add optional params only when not None
         optional_params = {
             "max_tokens": kwargs.get("max_tokens", self.max_tokens),
             "temperature": kwargs.get("temperature", self.temperature),
@@ -127,7 +136,7 @@ class LLMProvider(LLMProviderBase):
             elif isinstance(getattr(chunk, "usage", None), CompletionUsage):
                 usage_info = getattr(chunk, "usage", None)
                 logger.bind(tag=TAG).info(
-                    f"Token 消耗：输入 {getattr(usage_info, 'prompt_tokens', '未知')}，"
-                    f"输出 {getattr(usage_info, 'completion_tokens', '未知')}，"
-                    f"共计 {getattr(usage_info, 'total_tokens', '未知')}"
+                    f"Token usage: input={getattr(usage_info, 'prompt_tokens', 'unknown')}, "
+                    f"output={getattr(usage_info, 'completion_tokens', 'unknown')}, "
+                    f"total={getattr(usage_info, 'total_tokens', 'unknown')}"
                 )

@@ -133,11 +133,16 @@ class MemoryProvider(MemoryProviderBase):
             yaml.dump(all_memory, f, allow_unicode=True)
 
     async def save_memory(self, msgs, session_id=None):
-        # 打印使用的模型信息
+        # Log model info used for memory summarization
         model_info = getattr(self.llm, "model_name", str(self.llm.__class__.__name__))
-        logger.bind(tag=TAG).debug(f"使用记忆保存模型: {model_info}")
+        llm_base_url = getattr(self.llm, "base_url", "unknown")
+        llm_api_key = getattr(self.llm, "api_key", None)
+        masked_key = f"{llm_api_key[:8]}...{llm_api_key[-4:]}" if llm_api_key and len(llm_api_key) > 12 else "NOT SET"
+        logger.bind(tag=TAG).info(
+            f"Memory save using LLM: model={model_info}, base_url={llm_base_url}, api_key={masked_key}"
+        )
         api_key = getattr(self.llm, "api_key", None)
-        memory_key_msg = check_model_key("记忆总结专用LLM", api_key)
+        memory_key_msg = check_model_key("Memory summarization LLM", api_key)
         if memory_key_msg:
             logger.bind(tag=TAG).error(memory_key_msg)
         if self.llm is None:

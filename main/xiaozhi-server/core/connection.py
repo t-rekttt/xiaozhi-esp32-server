@@ -828,14 +828,14 @@ class ConnectionHandler:
 
     def change_system_prompt(self, prompt):
         self.prompt = prompt
-        # 更新系统prompt至上下文
+        # Update system prompt in context
         self.dialogue.update_system_message(self.prompt)
 
     def chat(self, query, depth=0):
         if query is not None:
-            self.logger.bind(tag=TAG).info(f"大模型收到用户消息: {query}")
+            self.logger.bind(tag=TAG).info(f"LLM received user message: {query}")
 
-        # 为最顶层时新建会话ID和发送FIRST请求
+        # Create new session ID and send FIRST request at top level
         if depth == 0:
             self.sentence_id = str(uuid.uuid4().hex)
             self.dialogue.put(Message(role="user", content=query))
@@ -847,16 +847,16 @@ class ConnectionHandler:
                 )
             )
 
-        # 设置最大递归深度，避免无限循环，可根据实际需求调整
+        # Set max recursion depth to avoid infinite loops
         MAX_DEPTH = 5
         force_final_answer = False  # 标记是否强制最终回答
 
         if depth >= MAX_DEPTH:
             self.logger.bind(tag=TAG).debug(
-                f"已达到最大工具调用深度 {MAX_DEPTH}，将强制基于现有信息回答"
+                f"Reached max tool call depth {MAX_DEPTH}, forcing final answer based on available info"
             )
             force_final_answer = True
-            # 添加系统指令，要求 LLM 基于现有信息回答
+            # Add system instruction to force LLM to answer based on existing info
             self.dialogue.put(
                 Message(
                     role="user",
@@ -864,24 +864,24 @@ class ConnectionHandler:
                 )
             )
 
-        # 长对话工具调用提醒：当对话轮数较多时，提醒模型正确使用工具
-        force_reminder = False  # 是否强制提醒
+        # Long conversation tool call reminder: remind model to use tools correctly when dialogue is long
+        force_reminder = False
 
         if depth == 0 and query is not None:
             dialogue_length = len(self.dialogue.dialogue)
             current_turn = dialogue_length // 2
 
-            # 检测距离上一次连续未调用工具的情况
+            # Detect consecutive turns without tool calls
             if self.tool_call_stats['last_call_turn'] >= 0:
                 turns_since_last = current_turn - self.tool_call_stats['last_call_turn']
-                if turns_since_last > 3:  # 超过3轮未调用
+                if turns_since_last > 3:
                     self.logger.bind(tag=TAG).warning(
-                        f"检测到{turns_since_last}轮未调用工具，可能进入偷懒模式，将强制注入提醒"
+                        f"Detected {turns_since_last} turns without tool calls, possible lazy mode, injecting reminder"
                     )
                     force_reminder = True
 
-            # 对话历史截断：防止历史过长导致模型"偷懒模式"扩散
-            # 当对话历史超过阈值时，保留最近的 10 轮对话
+            # Dialogue history truncation: prevent lazy mode from long history
+            # When dialogue exceeds threshold, keep only the last 10 turns
             # max_dialogue_turns = 10
             # if dialogue_length > max_dialogue_turns * 2:
             #     removed = self.dialogue.trim_history(max_turns=max_dialogue_turns)
@@ -892,7 +892,7 @@ class ConnectionHandler:
 
         # Define intent functions
         functions = None
-        # 达到最大深度时，禁用工具调用，强制 LLM 直接回答
+        # When max depth reached, disable tool calls and force LLM to answer directly
         if (
                 self.intent_type == "function_call"
                 and hasattr(self, "func_handler")
@@ -900,53 +900,63 @@ class ConnectionHandler:
         ):
             functions = self.func_handler.get_functions()
 
-        # 长对话工具调用规则强化：动态生成基于当前可用工具的提醒
+        # Long dialogue tool call rule reinforcement: dynamically generate reminder based on available tools
         tool_call_reminder = None
         if depth == 0 and query is not None and functions is not None:
             dialogue_length = len(self.dialogue.dialogue)
-            # 当对话历史超过4条消息时，注入规则强化
+            # Inject rule reinforcement when dialogue exceeds 4 messages
             if dialogue_length > 4:
                 tool_summary = self._get_tool_summary(functions)
                 if tool_summary:
-                    # 根据对话长度和偷懒检测，使用不同强度的提醒
+                    # Use different reminder intensity based on dialogue length and lazy detection
                     if force_reminder:
-                        # 强提醒 - 包含完整规则前缀
+                        # Strong reminder - includes full rule prefix
                         tool_call_reminder = (
                             TOOL_CALLING_RULES +
                             f"[重要提醒] 多轮未使用工具，检查回复是否遗漏了必要的工具调用！上一轮未使用工具，本轮必须重新判断是否需要工具。"
                             f"当前可用工具: {tool_summary}。"
                         )
-                        reminder_level = "强"
+                        reminder_level = "strong"
                     else:
-                        # 中等提醒 - 包含规则前缀
+                        # Medium reminder - includes rule prefix
                         tool_call_reminder = (
                             TOOL_CALLING_RULES +
                             f"当前可用工具: {tool_summary}。"
                             f"仅当用户请求涉及实时信息查询或执行操作时调用，日常对话无需调用。"
                         )
-                        reminder_level = "中"
+                        reminder_level = "medium"
                     self.logger.bind(tag=TAG).debug(
-                        f"对话历史较长({dialogue_length}条)，已注入{reminder_level}等级工具调用规则强化，当前可用工具：{tool_summary}"
+                        f"Long dialogue ({dialogue_length} messages), injected {reminder_level} level tool call reinforcement, available tools: {tool_summary}"
                     )
 
         response_message = []
 
-        # 如果有工具调用提醒，临时添加到对话中（标记为临时消息）
+        # If there's a tool call reminder, temporarily add to dialogue (marked as temporary)
         if tool_call_reminder:
             self.dialogue.put(Message(role="user", content=tool_call_reminder, is_temporary=True))
 
         try:
-            # 使用带记忆的对话
+            # Use dialogue with memory
             memory_str = None
-            # 仅当query非空（代表用户询问）时查询记忆
+            # Only query memory when query is not empty (represents user question)
             if self.memory is not None and query:
                 future = asyncio.run_coroutine_threadsafe(
                     self.memory.query_memory(query), self.loop
                 )
                 memory_str = future.result()
 
+            # Log LLM call details for troubleshooting
+            llm_model = getattr(self.llm, 'model_name', 'unknown')
+            llm_base_url = getattr(self.llm, 'base_url', 'unknown')
+            llm_api_key = getattr(self.llm, 'api_key', None)
+            masked_key = f"{llm_api_key[:8]}...{llm_api_key[-4:]}" if llm_api_key and len(llm_api_key) > 12 else "NOT SET"
+            self.logger.bind(tag=TAG).info(
+                f"Calling LLM: model={llm_model}, base_url={llm_base_url}, api_key={masked_key}, "
+                f"intent_type={self.intent_type}, has_functions={functions is not None}, depth={depth}"
+            )
+
             if self.intent_type == "function_call" and functions is not None:
-                # 使用支持functions的streaming接口
+                # Use streaming interface with function support
                 llm_responses = self.llm.response_with_functions(
                     self.session_id,
                     self.dialogue.get_llm_dialogue_with_memory(
@@ -962,12 +972,12 @@ class ConnectionHandler:
                     ),
                 )
         except Exception as e:
-            self.logger.bind(tag=TAG).error(f"LLM 处理出错 {query}: {e}")
+            self.logger.bind(tag=TAG).error(f"LLM processing error for query '{query}': {e}")
             return None
 
-        # 处理流式响应
+        # Process streaming response
         tool_call_flag = False
-        # 支持多个并行工具调用 - 使用列表存储
+        # Support multiple parallel tool calls - stored in list
         tool_calls_list = []  # 格式: [{"id": "", "name": "", "arguments": ""}]
         content_arguments = ""
         self.client_abort = False
@@ -994,7 +1004,7 @@ class ConnectionHandler:
                 else:
                     content = response
 
-                # 在llm回复中获取情绪表情，一轮对话只在开头获取一次
+                # Extract emotion from LLM response, only once at the beginning of each turn
                 if emotion_flag and content is not None and content.strip():
                     asyncio.run_coroutine_threadsafe(
                         textUtils.get_emotion(self, content),
@@ -1032,10 +1042,10 @@ class ConnectionHandler:
                     )
                 )
             return
-        # 处理function call
+        # Process function calls
         if tool_call_flag:
             bHasError = False
-            # 处理基于文本的工具调用格式
+            # Process text-based tool call format
             if len(tool_calls_list) == 0 and content_arguments:
                 a = extract_json_from_string(content_arguments)
                 if a is not None:
@@ -1063,16 +1073,16 @@ class ConnectionHandler:
                     )
 
             if not bHasError and len(tool_calls_list) > 0:
-                # 更新工具调用统计
+                # Update tool call statistics
                 if depth == 0:
                     current_turn = len(self.dialogue.dialogue) // 2
                     self.tool_call_stats['last_call_turn'] = current_turn
                     self.tool_call_stats['consecutive_no_call'] = 0
                     self.logger.bind(tag=TAG).debug(
-                        f"工具调用统计更新: 当前轮次={current_turn}"
+                        f"Tool call stats updated: current_turn={current_turn}"
                     )
 
-                # 如需要大模型先处理一轮，添加相关处理后的日志情况
+                # If LLM needs to process a turn first, add processed response to dialogue
                 if len(response_message) > 0:
                     text_buff = "".join(response_message)
                     self.tts_MessageText = text_buff
@@ -1080,10 +1090,10 @@ class ConnectionHandler:
                 response_message.clear()
 
                 self.logger.bind(tag=TAG).debug(
-                    f"检测到 {len(tool_calls_list)} 个工具调用"
+                    f"Detected {len(tool_calls_list)} tool call(s)"
                 )
 
-                # 收集所有工具调用的 Future
+                # Collect all tool call futures
                 futures_with_data = []
                 for tool_call_data in tool_calls_list:
                     self.logger.bind(tag=TAG).debug(
@@ -1098,23 +1108,23 @@ class ConnectionHandler:
                     )
                     futures_with_data.append((future, tool_call_data))
 
-                # 等待协程结束（实际等待时长为最慢的那个）
+                # Wait for coroutines to finish (actual wait = slowest one)
                 tool_results = []
                 for future, tool_call_data in futures_with_data:
                     result = future.result()
                     tool_results.append((result, tool_call_data))
 
-                # 统一处理所有工具调用结果
+                # Process all tool call results
                 if tool_results:
                     self._handle_function_result(tool_results, depth=depth)
 
-        # 存储对话内容
+        # Store dialogue content
         if len(response_message) > 0:
             text_buff = "".join(response_message)
             self.tts_MessageText = text_buff
             self.dialogue.put(Message(role="assistant", content=text_buff))
 
-            # 更新工具调用统计：如果没有调用工具，增加计数
+            # Update tool call stats: increment counter if no tool was called
             if depth == 0 and not tool_call_flag:
                 self.tool_call_stats['consecutive_no_call'] += 1
 
@@ -1126,14 +1136,14 @@ class ConnectionHandler:
                     content_type=ContentType.ACTION,
                 )
             )
-            # 使用lambda延迟计算，只有在DEBUG级别时才执行get_llm_dialogue()
+            # Use lambda for lazy evaluation, only executes get_llm_dialogue() at DEBUG level
             self.logger.bind(tag=TAG).debug(
                 lambda: json.dumps(
                     self.dialogue.get_llm_dialogue(), indent=4, ensure_ascii=False
                 )
             )
 
-            # 清理临时插入的工具调用提醒消息（使用标记清理）
+            # Clean up temporarily injected tool call reminder messages
             if tool_call_reminder and len(self.dialogue.dialogue) > 0:
                 original_length = len(self.dialogue.dialogue)
                 self.dialogue.dialogue = [
@@ -1141,7 +1151,7 @@ class ConnectionHandler:
                     if not getattr(msg, 'is_temporary', False)
                 ]
                 if len(self.dialogue.dialogue) < original_length:
-                    self.logger.bind(tag=TAG).debug("已清理临时的工具调用提醒消息")
+                    self.logger.bind(tag=TAG).debug("Cleaned up temporary tool call reminder messages")
 
         return True
 
