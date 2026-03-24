@@ -4,7 +4,10 @@ version: '3'
 services:
   # Server模块
   xiaozhi-esp32-server:
-    image: ghcr.nju.edu.cn/xinnan-tech/xiaozhi-esp32-server:server_latest
+    build:
+      context: ../../
+      dockerfile: Dockerfile-server
+    image: xiaozhi-esp32-server:custom
     container_name: xiaozhi-esp32-server
     depends_on:
       - xiaozhi-esp32-server-db
