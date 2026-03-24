@@ -132,7 +132,7 @@ def remove_punctuation_and_length(text):
 
 def check_model_key(modelType, modelKey):
     if "你" in modelKey:
-        return f"配置错误: {modelType} 的 API key 未设置,当前值为: {modelKey}"
+        return f"Config error: {modelType} API key not set, current value is a placeholder: {modelKey}"
     return None
 
 
