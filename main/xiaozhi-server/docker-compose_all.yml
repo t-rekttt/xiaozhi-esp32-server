@@ -5,7 +5,7 @@ services:
   # Server模块
   xiaozhi-esp32-server:
     build:
-      context: ../../
+      context: .
       dockerfile: Dockerfile-server
     image: xiaozhi-esp32-server:custom
     container_name: xiaozhi-esp32-server
