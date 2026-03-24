@@ -60,7 +60,20 @@ class LLMProvider(LLMProviderBase):
                 msg["content"] = ""
         return dialogue
 
+    def _check_api_key(self):
+        """Raise a clear error if the API key is a placeholder or contains non-ASCII characters."""
+        if not self.api_key:
+            raise ValueError("LLM API key is not set")
+        try:
+            self.api_key.encode("ascii")
+        except UnicodeEncodeError:
+            raise ValueError(
+                f"LLM API key contains non-ASCII characters (likely a placeholder). "
+                f"Please set a valid API key. Current value: {self.api_key}"
+            )
+
     def response(self, session_id, dialogue, **kwargs):
+        self._check_api_key()
         dialogue = self.normalize_dialogue(dialogue)
 
         request_params = {
@@ -105,6 +118,7 @@ class LLMProvider(LLMProviderBase):
                     yield content
 
     def response_with_functions(self, session_id, dialogue, functions=None, **kwargs):
+        self._check_api_key()
         dialogue = self.normalize_dialogue(dialogue)
 
         request_params = {
